@@ -760,6 +760,34 @@ in
             ExecStart = "${pkgs.postfix}/bin/postfix start";
             ExecStop = "${pkgs.postfix}/bin/postfix stop";
             ExecReload = "${pkgs.postfix}/bin/postfix reload";
+
+            StateDirectory = "postfix";
+            StateDirectoryMode = "0755";
+            ReadWritePaths = [ "/var/spool/mail" ];
+
+            CapabilityBoundingSet = "CAP_NET_BIND_SERVICE CAP_DAC_READ_SEARCH CAP_SETUID CAP_SETGID";
+            DevicePolicy = "closed";
+            LockPersonality = true;
+            MemoryDenyWriteExecute = true;
+            NoNewPrivileges = true;
+            PrivateDevices = true;
+            PrivateMounts = true;
+            PrivateTmp = true;
+            ProtectClock = true;
+            ProtectControlGroups = true;
+            ProtectHome = true;
+            ProtectHostname = true;
+            ProtectKernelLogs = true;
+            ProtectKernelModules = true;
+            ProtectKernelTunables = true;
+            ProtectSystem = "strict";
+            RestrictAddressFamilies = "AF_INET AF_INET6 AF_NETLINK AF_UNIX";
+            RestrictNamespaces = true;
+            RestrictRealtime = true;
+            RestrictSUIDSGID = true;
+            SystemCallArchitectures = "native";
+            SystemCallFilter = [ "@system-service" "~@resources" ];
+            UMask = "0077";
           };
         };
 
