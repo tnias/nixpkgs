@@ -15,6 +15,47 @@ let
   haveVirtual = cfg.virtual != "";
   haveLocalRecipients = cfg.localRecipients != null;
 
+  preparePostfixScript = pkgs.writeScript "prepare-postfix" ''
+    #!${pkgs.stdenv.shell}
+
+    set -euo pipefail
+
+    # Backwards compatibility
+    if [ ! -d /var/lib/postfix ] && [ -d /var/postfix ]; then
+      mkdir -p /var/lib
+      mv /var/postfix /var/lib/postfix
+    fi
+
+    # All permissions set according ${pkgs.postfix}/etc/postfix/postfix-files script
+    mkdir -p /var/lib/postfix /var/lib/postfix/queue/{pid,public,maildrop}
+    chmod 0755 /var/lib/postfix
+    chown root:root /var/lib/postfix
+
+    rm -rf /var/lib/postfix/conf
+    mkdir -p /var/lib/postfix/conf
+    chmod 0755 /var/lib/postfix/conf
+    ln -sf ${pkgs.postfix}/etc/postfix/postfix-files /var/lib/postfix/conf/postfix-files
+    ln -sf ${mainCfFile} /var/lib/postfix/conf/main.cf
+    ln -sf ${masterCfFile} /var/lib/postfix/conf/master.cf
+
+    ${concatStringsSep "\n" (mapAttrsToList (to: from: ''
+      ln -sf ${from} /var/lib/postfix/conf/${to}
+      ${pkgs.postfix}/bin/postalias /var/lib/postfix/conf/${to}
+    '') cfg.aliasFiles)}
+    ${concatStringsSep "\n" (mapAttrsToList (to: from: ''
+      ln -sf ${from} /var/lib/postfix/conf/${to}
+      ${pkgs.postfix}/bin/postmap /var/lib/postfix/conf/${to}
+    '') cfg.mapFiles)}
+
+    mkdir -p /var/spool/mail
+    chown root:root /var/spool/mail
+    chmod a+rwxt /var/spool/mail
+    ln -sf /var/spool/mail /var/
+
+    #Finally delegate to postfix checking remain directories in /var/lib/postfix and set permissions on them
+    ${pkgs.postfix}/bin/postfix set-permissions config_directory=/var/lib/postfix/conf
+  '';
+
   clientAccess =
     optional (cfg.dnsBlacklistOverrides != "")
       "check_client_access hash:/etc/postfix/client_access";
@@ -720,44 +761,15 @@ in
             ExecStop = "${pkgs.postfix}/bin/postfix stop";
             ExecReload = "${pkgs.postfix}/bin/postfix reload";
           };
-
-          preStart = ''
-            # Backwards compatibility
-            if [ ! -d /var/lib/postfix ] && [ -d /var/postfix ]; then
-              mkdir -p /var/lib
-              mv /var/postfix /var/lib/postfix
-            fi
-
-            # All permissions set according ${pkgs.postfix}/etc/postfix/postfix-files script
-            mkdir -p /var/lib/postfix /var/lib/postfix/queue/{pid,public,maildrop}
-            chmod 0755 /var/lib/postfix
-            chown root:root /var/lib/postfix
-
-            rm -rf /var/lib/postfix/conf
-            mkdir -p /var/lib/postfix/conf
-            chmod 0755 /var/lib/postfix/conf
-            ln -sf ${pkgs.postfix}/etc/postfix/postfix-files /var/lib/postfix/conf/postfix-files
-            ln -sf ${mainCfFile} /var/lib/postfix/conf/main.cf
-            ln -sf ${masterCfFile} /var/lib/postfix/conf/master.cf
-
-            ${concatStringsSep "\n" (mapAttrsToList (to: from: ''
-              ln -sf ${from} /var/lib/postfix/conf/${to}
-              ${pkgs.postfix}/bin/postalias /var/lib/postfix/conf/${to}
-            '') cfg.aliasFiles)}
-            ${concatStringsSep "\n" (mapAttrsToList (to: from: ''
-              ln -sf ${from} /var/lib/postfix/conf/${to}
-              ${pkgs.postfix}/bin/postmap /var/lib/postfix/conf/${to}
-            '') cfg.mapFiles)}
-
-            mkdir -p /var/spool/mail
-            chown root:root /var/spool/mail
-            chmod a+rwxt /var/spool/mail
-            ln -sf /var/spool/mail /var/
-
-            #Finally delegate to postfix checking remain directories in /var/lib/postfix and set permissions on them
-            ${pkgs.postfix}/bin/postfix set-permissions config_directory=/var/lib/postfix/conf
-          '';
         };
+
+      systemd.services.prepare-postfix = {
+        wantedBy = [ "multi-user.target" ];
+        before = [ "postifx.service" ];
+        serviceConfig = {
+          ExecStart = preparePostfixScript;
+        };
+      };
 
       services.postfix.config = (mapAttrs (_: v: mkDefault v) {
         compatibility_level  = "9999";
